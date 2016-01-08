@@ -1,0 +1,24 @@
+{
+  "name": "site-diff",
+  "version": "1.0.0",
+  "description": "site-diff",
+  "main": "site-diff",
+  "scripts": {
+    "test": "site-diff https://google.com/ https://google.com/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tfc1304/site-diff.git"
+  },
+  "keywords": [
+    "site",
+    "diff",
+    "compare"
+  ],
+  "author": "tfc1304",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/tfc1304/site-diff/issues"
+  },
+  "homepage": "https://github.com/tfc1304/site-diff#readme"
+}
