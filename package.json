@@ -20,5 +20,11 @@
   "bugs": {
     "url": "https://github.com/tfc1304/site-diff/issues"
   },
+  "dependencies": {
+    "commander": "~2.9.0",
+    "phantom": "~0.8.4",
+    "resemble": "~1.1.0",
+    "validator": "~4.5.0"
+  },
   "homepage": "https://github.com/tfc1304/site-diff#readme"
 }
