@@ -8,14 +8,14 @@ var fs = require('fs'),
 // NPM Packages.
 var program = require('commander'),
     phantom = require('phantom'),
-    resemble = require('resemble'),
-    validator = require('validator');
+    resemble = require('resemble');
 
 program
-  .version('0.0.1')
-  .option('-d, --dimensions <size>', 'The dimensions to use for the viewport (default: 2550x1680) ')
+  .version('1.0.0')
+  .option('-d, --dimensions <size>', 'The dimensions to use for the viewport (default: 1920x1080) ')
   .option('-o, --output <output>', 'The directory to use to save the image files. (default: os.tmpdir())')
   .option('-p, --port <port>', 'The port to use for PhantomJS')
+  .option('-t --timeForScreenshot <timeForScreenshot>', 'Tempo em milisegundos que a aplicação irá aguardar antes de tirar um screenshot. (default: 500)')
   .parse(process.argv);
 
 // Check to make sure we have two paths as arguments and if not show help text and exit.
@@ -28,19 +28,21 @@ if (program.args.length !== 2) {
 // Make sure the urls provided are valid.
 var firstUrl = validateUrl(program.args[0]);
 var secondUrl = validateUrl(program.args[1]);
-//if (!validator.isURL(firstUrl) || !validator.isURL(secondUrl)) {
-//  console.error('Please specify two valid paths for comparison');
-//  process.exit(1);
-//}
 
 // Make sure our output directory is writeable, or fail early.
 var outputDirectory = program.output || os.tmpdir().substring(0, os.tmpdir().length - 1);
 if (!fs.existsSync(outputDirectory)) {
-  console.error('Please make sure %s exists and is writeable, or specify another output directory.', outputDirectory);
-  process.exit(1);
+  fs.mkdirSync(outputDirectory);
 }
 
-// Make sure PhantomJS is installed correctly.
+// We need to split the output dimensions by width and height.
+var outputDimensions = program.dimensions || '1920x1080';
+var timeForScreenshot = program.timeForScreenshot || 500;
+var dimensions = outputDimensions.split('x');
+var viewportWidth = dimensions[0];
+var viewportHeight = dimensions[1];
+var closed = false;
+
 exec('which phantomjs', function(err, stdout) {
   if (err) {
     console.error("phantomjs doesn't appear to be available in your path. Please `brew install phantomjs` or the equivalent for your system.");
@@ -49,77 +51,105 @@ exec('which phantomjs', function(err, stdout) {
 
   // If we have two paths, and phantomjs good to go take some screenshots.
   var port = program.port || 12345;
-  // We need to split the output dimensions by width and height.
-  var outputDimensions = program.dimensions || '2550x1880';
-  var dimensions = outputDimensions.split('x');
-  var viewportWidth = dimensions[0];
-  var viewportHeight = dimensions[1];
 
-  var firstUrlImage = outputDirectory + '/' + imageFileName(firstUrl, outputDimensions);
-  var secondUrlImage = outputDirectory + '/' + imageFileName(secondUrl, outputDimensions);
-  var diffImagePath = outputDirectory + '/' + outputDimensions + '_diff.png';
-  
-  // Start up a phantomjs browser (ignoring ssl issues).
-  phantom.create('--web-security=no', '--ignore-ssl-errors=yes', { "port": port }, function(ph) {
-    console.log('PhantomJS Browser started.');
+  phantom.create('--web-security=no', '--ignore-ssl-errors=yes', { "port": port, onExit: diffImage }, function(browser) {
 
-    // Create and open a page for our first url.
-    ph.createPage(function(page) {
-      page.open(firstUrl, function(status) {
-        if (status == 'success') {
-          // Set the viewport to the desired dimensions.
-          page.set('viewportSize', { width: viewportWidth, height: viewportHeight }, function(status) {
-            // and save the screenshot.
-            page.render(firstUrlImage, function(err, status) {
-              console.log(firstUrl + ' captured.');
+      console.log("Navegador PhantomJS iniciado.");
 
-              // Now get the image for the second site.
-              page.open(secondUrl, function(status) {
-                page.set('viewportSize', { width: viewportWidth, height: viewportHeight }, function(status) {
-                  page.render(secondUrlImage, function(err, status) {
-                    console.log(secondUrl + ' captured.');
-                    // Close our page.
-                    page.close();
-                    // Exit PhantomJS
-                    ph.exit();
-                    // Generate our diff image with resemble.
-                    resemble.resemble(firstUrlImage).compareTo(secondUrlImage).ignoreNothing().onComplete(function(data) {
-                      var diffImage = data.getImageDataUrl().replace(/^data:image\/png;base64,/,"");
-
-                      console.log(data)
-
-                      // Write the diff file to disk.
-                      fs.writeFile(diffImagePath, diffImage, 'base64', function(err) {
-                        if (err) throw err;
-
-                        console.log('Your diff has been saved to %s', diffImagePath);
-                      });
-                    });
-                  });
-                });
-              });
-            });
-          });
-        }
+      browser.createPage(function(page) {
+        screenshot(page, firstUrl, function() {
+            close(browser);
+        });
       });
-    });
+
+      browser.createPage(function(page) {
+        screenshot(page, secondUrl, function() {
+            close(browser);
+        });
+      });
   });
 });
 
-// Take a url input, normalize it to add http:// if it's missing, since it's needed by phantomjs.
-function validateUrl(path) {
-  if (url.parse(path).host === null) {
-    // Try adding an 'http://' to the url to see if that works.
-    if (url.parse('http://' + path).host !== null) {
-      path = 'http://' + path;
-    }
-  }
 
-  return path;
+
+function close(browser) {
+    if(closed) {
+        console.log("Navegador PhantomJS fechado.")
+        browser.exit();
+    } else {
+        closed = true;
+    }
 }
 
-// For a given url, strip the 'http://' replace any other path '/'s with
-// underscores and add dimension information so we can keep breakpoints straight.
+function screenshot(page, url, callback) {
+
+    page.set('viewportSize', { width: viewportWidth, height: viewportHeight });
+
+    page.open(url, function(status) {
+        if (status != "success") {
+            console.error("A url [%s] retornou com o status [%s]. A aplicação irá sair!", url, status);
+            process.exit(1);
+        }
+
+        console.log("Url [%s] carregada com sucesso.", url);
+
+        var pathImage = outputDirectory + '/' + imageFileName(url, outputDimensions);
+
+        setTimeout(function() {
+            page.render(pathImage);
+
+            console.log("Screenshot da página foi salva no caminho [%s].", pathImage);
+
+            page.close();
+
+            if(callback) callback();
+        }, timeForScreenshot);
+
+    });
+}
+
+function diffImage() {
+    var pathImage1 = outputDirectory + '/' + imageFileName(firstUrl, outputDimensions);
+    var pathImage2 = outputDirectory + '/' + imageFileName(secondUrl, outputDimensions);
+
+    var diffImagePath = outputDirectory + '/' + outputDimensions + '_diff.png';
+
+    resemble.resemble(pathImage1).compareTo(pathImage2).ignoreNothing().onComplete(function(data) {
+        var diffImage = data.getImageDataUrl().replace(/^data:image\/png;base64,/,"");
+
+        console.log("Diferença de %s%", data.misMatchPercentage);
+
+        // Write the diff file to disk.
+        fs.writeFile(diffImagePath, diffImage, 'base64', function(err) {
+            if (err) throw err;
+        });
+    });
+}
+
+// Take a url input, normalize it to add http:// if it's missing, since it's needed by phantomjs.
+function validateUrl(path) {
+    if (url.parse(path).host === null) {
+        // Try adding an 'http://' to the url to see if that works.
+        if (url.parse('http://' + path).host !== null) {
+            path = 'http://' + path;
+        }
+    }
+
+    return path;
+}
+
 function imageFileName(fullUrl, dimensions) {
-  return fullUrl.replace('http://', '').replace('/', '_') + '_' + dimensions + '.png';
+    var fileName = fullUrl.replace('http://', '');
+
+    fileName = replaceAll(fileName, '/', '_');
+    fileName = replaceAll(fileName, ':', '_');
+    fileName = replaceAll(fileName, '\\.', '_');
+
+    fileName = fileName + dimensions + '.png';
+
+    return fileName;
+}
+
+function replaceAll(str, find, replace) {
+  return str.replace(new RegExp(find, 'g'), replace);
 }
